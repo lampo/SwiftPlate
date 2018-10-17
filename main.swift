@@ -95,11 +95,10 @@ extension Array {
 // MARK: - Types
 
 struct Arguments {
+    var platform: String?
     var destination: String?
     var projectName: String?
     var authorName: String?
-    var authorEmail: String?
-    var githubURL: String?
     var organizationName: String?
     var repositoryURL: URL?
     var forceEnabled: Bool = false
@@ -107,16 +106,14 @@ struct Arguments {
     init(commandLineArguments arguments: [String]) {
         for (index, argument) in arguments.enumerated() {
             switch argument.lowercased() {
+            case "--platform", "-pl":
+                platform = arguments.element(after: index)
             case "--destination", "-d":
                 destination = arguments.element(after: index)
             case "--project", "-p":
                 projectName = arguments.element(after: index)
             case "--name", "-n":
                 authorName = arguments.element(after: index)
-            case "--email", "-e":
-                authorEmail = arguments.element(after: index)
-            case "--url", "-u":
-                githubURL = arguments.element(after: index)
             case "--organization", "-o":
                 organizationName = arguments.element(after: index)
             case "--repo", "-r":
@@ -135,18 +132,16 @@ struct Arguments {
 class StringReplacer {
     private let projectName: String
     private let authorName: String
-    private let authorEmail: String
-    private let gitHubURL: String
     private let year: String
     private let today: String
     private let organizationName: String
+    private let bundleId: String
     
-    init(projectName: String, authorName: String, authorEmail: String?, gitHubURL: String?, organizationName: String?) {
+    init(projectName: String, authorName: String, organizationName: String, bundleId: String) {
         self.projectName = projectName
         self.authorName = authorName
-        self.authorEmail = authorEmail ?? ""
-        self.gitHubURL = gitHubURL ?? ""
-        self.organizationName = organizationName ?? projectName
+        self.organizationName = organizationName
+        self.bundleId = bundleId
         
 
         let yearFormatter = DateFormatter()
@@ -169,12 +164,13 @@ class StringReplacer {
     func process(string: String) -> String {
         return string.replacingOccurrences(of: "{PROJECT}", with: projectName)
                      .replacingOccurrences(of: "{AUTHOR}", with: authorName)
-                     .replacingOccurrences(of: "{EMAIL}", with: authorEmail)
-                     .replacingOccurrences(of: "{URL}", with: gitHubURL)
                      .replacingOccurrences(of: "{YEAR}", with: year)
                      .replacingOccurrences(of: "{TODAY}", with: today)
                      .replacingOccurrences(of: "{DATE}", with: dateString)
                      .replacingOccurrences(of: "{ORGANIZATION}", with: organizationName)
+                     .replacingOccurrences(of: "{BUNDLEID}", with: bundleId)
+
+        
     }
     
     func process(filesInFolderWithPath folderPath: String) throws {
@@ -242,6 +238,17 @@ func askForBooleanInfo(question: String) -> Bool {
     }
 }
 
+func askForPlatformType() -> String {
+    let defaultPlatform = "iOS"
+    
+    let platformType = askForOptionalInfo(
+        question: "📱  Is this an iOS project or a macOS project?",
+        questionSuffix: "(Leave empty to default to iOS)"
+    )
+    
+    return platformType ?? defaultPlatform
+}
+
 func askForDestination() -> String {
     let destination = askForOptionalInfo(
         question: "📦  Where would you like to generate a project?",
@@ -285,68 +292,31 @@ func askForAuthorName() -> String {
     return askForRequiredInfo(question: question, errorMessage: "Your name cannot be empty")
 }
 
-func askForAuthorEmail() -> String? {
-    let gitEmail = Process().gitConfigValue(forKey: "user.email")
-    let question = "📫  What's your email address (for Podspec)?"
-    
-    if let gitEmail = gitEmail {
-        let authorEmail = askForOptionalInfo(question: question, questionSuffix: "(Leave empty to use your git config email: \(gitEmail))")
-        return authorEmail ?? gitEmail
-    }
-    
-    return askForOptionalInfo(question: question)
-}
-
-func askForGitHubURL(destination: String) -> String? {
-    let gitURL = Process().launchBash(withCommand: "cd \(destination) && git remote get-url origin")?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .withoutSuffix(".git")
-    
-    let question = "🌍  Any GitHub URL that you'll be hosting this project at (for Podspec)?"
-    
-    if let gitURL = gitURL {
-        let gitHubURL = askForOptionalInfo(question: question, questionSuffix: "(Leave empty to use the remote URL of your repo: \(gitURL))")
-        return gitHubURL ?? gitURL
-    }
-    
-    return askForOptionalInfo(question: question)
-}
-
 func performCommand(description: String, command: () throws -> Void) rethrows {
     print("👉  \(description)...")
     try command()
     print("✅  Done")
 }
-
 // MARK: - Program
 
 print("Welcome to the SwiftPlate project generator 🐣")
 
 let arguments = Arguments(commandLineArguments: CommandLine.arguments)
+let platform = arguments.platform ?? askForPlatformType()
 let destination = arguments.destination ?? askForDestination()
 let projectName = arguments.projectName ?? askForProjectName(destination: destination)
 let authorName = arguments.authorName ?? askForAuthorName()
-let authorEmail = arguments.authorEmail ?? askForAuthorEmail()
-let gitHubURL = arguments.githubURL ?? askForGitHubURL(destination: destination)
-let organizationName = arguments.organizationName ?? askForOptionalInfo(question: "🏢  What's your organization name?")
+let organizationName = "Ramsey Solutions"
+let bundleId = "ramseysolutions"
+
 
 print("---------------------------------------------------------------------")
 print("SwiftPlate will now generate a project with the following parameters:")
+print("📱  Platform: \(platform)")
 print("📦  Destination: \(destination)")
 print("📛  Name: \(projectName)")
 print("👶  Author: \(authorName)")
-
-if let authorEmail = authorEmail {
-    print("📫  Author email: \(authorEmail)")
-}
-
-if let gitHubURL = gitHubURL {
-    print("🌍  GitHub URL: \(gitHubURL)")
-}
-
-if let organizationName = organizationName {
-    print("🏢  Organization Name: \(organizationName)")
-}
+print("🏢  Organization Name: \(organizationName)")
 
 print("---------------------------------------------------------------------")
 
@@ -362,7 +332,8 @@ do {
     let fileManager = FileManager.default
     let temporaryDirectoryPath = destination + "/swiftplate_temp"
     let gitClonePath = "\(temporaryDirectoryPath)/SwiftPlate"
-    let templatePath = "\(gitClonePath)/Template"
+    let iOSTemplatePath = "\(gitClonePath)/iOSTemplate"
+    let macOSTemplatePath = "\(gitClonePath)/macOSTemplate"
     
     performCommand(description: "Removing any previous temporary folder") {
         try? fileManager.removeItem(atPath: temporaryDirectoryPath)
@@ -373,7 +344,7 @@ do {
     }
     
     performCommand(description: "Making a local clone of the SwiftPlate repo") {
-        let repositoryURL = arguments.repositoryURL ?? URL(string: "https://github.com/JohnSundell/SwiftPlate.git")!
+        let repositoryURL = arguments.repositoryURL ?? URL(string: "https://github.com/lampo/SwiftPlate.git")!
         Process().launchBash(withCommand: "git clone \(repositoryURL.absoluteString) '\(gitClonePath)' -q")
     }
     
@@ -384,9 +355,11 @@ do {
         }.filter {
             ignorableItems.contains($0)
         }
+        
+        let path = platform == "iOS" ? iOSTemplatePath : macOSTemplatePath
 
-        for itemName in try fileManager.contentsOfDirectory(atPath: templatePath) {
-            let originPath = templatePath + "/" + itemName
+        for itemName in try fileManager.contentsOfDirectory(atPath: path) {
+            let originPath = path + "/" + itemName
             let destinationPath = destination + "/" + itemName
 
             let lowercasedItemName = itemName.lowercased()
@@ -406,12 +379,15 @@ do {
         let replacer = StringReplacer(
             projectName: projectName,
             authorName: authorName,
-            authorEmail: authorEmail,
-            gitHubURL: gitHubURL,
-            organizationName: organizationName
+            organizationName: organizationName,
+            bundleId: bundleId
         )
         
         try replacer.process(filesInFolderWithPath: destination)
+    }
+    
+    performCommand(description: "Setting up Carthage (running Carthage bootstrap)") {
+        Process().launchBash(withCommand: "cd \(destination) && carthage update")
     }
     
     print("All done! 🎉  Good luck with your project! 🚀")

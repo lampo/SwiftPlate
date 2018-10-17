@@ -5,7 +5,7 @@ import sys
 import os
 from os.path import join, getsize
 
-rootFiles = set(['LICENSE', 'Package.swift', 'README.md', sys.argv[1] + '.podspec'])
+rootFiles = set(['LICENSE', 'Package.swift', 'README.md'])
 configFiles = set([sys.argv[1] + '.plist', sys.argv[1] + 'Tests.plist'])
 sourceFiles = set([sys.argv[1]+ '.swift'])
 testDirs = set([sys.argv[1] + 'Tests'])
